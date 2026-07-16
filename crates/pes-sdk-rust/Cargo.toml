@@ -1,0 +1,18 @@
+[package]
+name = "pes-sdk-rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+pes-core.workspace = true
+pes-protocol.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+futures.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio-test.workspace = true

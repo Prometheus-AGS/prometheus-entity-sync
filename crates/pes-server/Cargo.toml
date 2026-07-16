@@ -1,0 +1,18 @@
+[package]
+name = "pes-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "pes-server"
+path = "src/main.rs"
+
+[dependencies]
+pes-gateway.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true

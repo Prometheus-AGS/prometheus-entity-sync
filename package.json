@@ -1,0 +1,10 @@
+{
+  "name": "prometheus-entity-sync",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "typecheck": "pnpm -r run typecheck"
+  }
+}

@@ -1,0 +1,30 @@
+# Rust
+/target/
+**/target/
+Cargo.lock
+
+# Node / pnpm
+node_modules/
+**/node_modules/
+dist/
+.turbo/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+config.local.toml
+secrets.toml
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Build artifacts
+*.redb
+*.db
+*.sqlite

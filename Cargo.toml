@@ -1,0 +1,62 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/pes-core",
+    "crates/pes-rules",
+    "crates/pes-oplog",
+    "crates/pes-snapshot",
+    "crates/pes-protocol",
+    "crates/pes-gateway",
+    "crates/pes-server",
+    "crates/pes-sdk-rust",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/prometheusags/prometheus-entity-sync"
+rust-version = "1.85"
+
+[workspace.dependencies]
+# Internal crates
+pes-core = { path = "crates/pes-core" }
+pes-rules = { path = "crates/pes-rules" }
+pes-oplog = { path = "crates/pes-oplog" }
+pes-snapshot = { path = "crates/pes-snapshot" }
+pes-protocol = { path = "crates/pes-protocol" }
+pes-gateway = { path = "crates/pes-gateway" }
+
+# Flint Realtime Fabric (FRF) — reused server-side machinery
+frf-postgres-cdc = { path = "../flint-realtime-fabric/crates/frf-postgres-cdc" }
+frf-crdt = { path = "../flint-realtime-fabric/crates/frf-crdt" }
+frf-store-redb = { path = "../flint-realtime-fabric/crates/frf-store-redb" }
+frf-ports = { path = "../flint-realtime-fabric/crates/frf-ports" }
+frf-domain = { path = "../flint-realtime-fabric/crates/frf-domain" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.24"
+futures = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rmp-serde = "1"
+toml = "0.8"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Testing
+proptest = "1"
+tokio-test = "0.4"
+
+[profile.release]
+lto = true
+codegen-units = 1

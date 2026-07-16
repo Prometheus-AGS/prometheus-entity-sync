@@ -1,0 +1,22 @@
+{
+  "name": "@prometheus-ags/entity-sync-pglite",
+  "version": "0.1.0",
+  "description": "PGlite extension applying prometheus-entity-sync delta ops to a local Postgres WASM database",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "license": "MIT",
+  "sideEffects": false,
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prometheus-ags/entity-sync-core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@electric-sql/pglite": "^0.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
