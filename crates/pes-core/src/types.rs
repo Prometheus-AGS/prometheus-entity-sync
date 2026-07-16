@@ -67,7 +67,7 @@ pub struct TokenClaims {
 }
 
 /// A single op appended to a `BucketOpLog`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BucketOp {
     /// The WAL position this op was derived from.
     pub lsn: PgLsn,
@@ -82,7 +82,7 @@ pub struct BucketOp {
 }
 
 /// The operation payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum Op {
     /// Insert or update the entity with the given JSON representation.
