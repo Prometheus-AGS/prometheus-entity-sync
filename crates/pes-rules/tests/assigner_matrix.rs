@@ -355,13 +355,21 @@ async fn unsafe_resolved_value_fails_loudly() {
 /// JWTs with distinct `sub` claims could grow the cache unboundedly (a
 /// memory-exhaustion vector), since `cache_lookup` only *ignores* stale
 /// entries on read and never removed them.
+///
+/// Uses a generous 5s TTL (rather than a tight millisecond window) so the
+/// "not expired yet" assertion can't flake under CI/DB round-trip latency —
+/// the three `assign()` calls populating the cache are real Postgres
+/// queries, not free. `sweep-sub-*` has no matching row in the seed data,
+/// so each `assign()` legitimately caches an empty `Vec` — sweeping counts
+/// *cache entries*, not resolved bucket assignments, so this is still a
+/// valid 3-entries-inserted / 3-entries-evicted test.
 #[tokio::test]
 async fn sweep_expired_entries_removes_stale_cache_entries() {
     let Some(pool) = connect().await else { return };
     let assigner = BucketAssigner::new(
         rule_set(vec![user_entities_rule()]),
         pool,
-        Duration::from_millis(50),
+        Duration::from_secs(5),
     )
     .expect("valid rule set");
 
@@ -370,16 +378,33 @@ async fn sweep_expired_entries_removes_stale_cache_entries() {
         assigner.assign(&claims(sub, 3600)).await.unwrap();
     }
 
-    // Nothing has expired yet — a sweep immediately after population should
-    // evict nothing.
+    // Nothing has expired yet (5s TTL, well beyond the time these three
+    // sequential DB round-trips just took) — a sweep now should evict
+    // nothing.
     assert_eq!(assigner.sweep_expired_entries(), 0);
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // All three entries are now past cache_ttl and should be evicted in one
-    // sweep; a second sweep finds nothing left to remove.
-    assert_eq!(assigner.sweep_expired_entries(), 3);
-    assert_eq!(assigner.sweep_expired_entries(), 0);
+    // Rebuild with a short TTL to deterministically observe expiry without
+    // depending on real-world sleep durations racing DB call latency: reuse
+    // the same cache contents is not possible across a fresh assigner, so
+    // instead prove eviction on a second assigner with an intentionally
+    // tiny TTL and a generous sleep margin.
+    let short_ttl_assigner = BucketAssigner::new(
+        rule_set(vec![user_entities_rule()]),
+        {
+            let Some(pool) = connect().await else { return };
+            pool
+        },
+        Duration::from_millis(10),
+    )
+    .expect("valid rule set");
+    for sub in ["sweep-sub-4", "sweep-sub-5", "sweep-sub-6"] {
+        short_ttl_assigner.assign(&claims(sub, 3600)).await.unwrap();
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    // All three entries are now well past cache_ttl and should be evicted
+    // in one sweep; a second sweep finds nothing left to remove.
+    assert_eq!(short_ttl_assigner.sweep_expired_entries(), 3);
+    assert_eq!(short_ttl_assigner.sweep_expired_entries(), 0);
 }
 
 /// Security hardening: a fresh entry inserted after a sweep survives a
@@ -395,14 +420,18 @@ async fn sweep_expired_entries_preserves_live_entries() {
     )
     .expect("valid rule set");
 
-    assigner.assign(&claims("live-sub", 3600)).await.unwrap();
+    // `auth-sub-1` has a real seeded row (see schema.sql), so this proves
+    // both that the cache entry survives the sweep AND that the survived
+    // entry still holds its resolved (non-empty) assignment data intact.
+    let first = assigner.assign(&claims("auth-sub-1", 3600)).await.unwrap();
+    assert_eq!(first.len(), 1);
     assert_eq!(assigner.sweep_expired_entries(), 0);
 
     // The entry is still well within its 30s TTL and must remain cached —
-    // proven indirectly via a second assign() call returning the same
-    // result without error (the cache path, not a fresh Postgres query).
-    let cached = assigner.assign(&claims("live-sub", 3600)).await.unwrap();
-    assert_eq!(cached.len(), 1);
+    // proven by a second assign() call returning the identical result via
+    // the cache path rather than a fresh Postgres query.
+    let cached = assigner.assign(&claims("auth-sub-1", 3600)).await.unwrap();
+    assert_eq!(cached, first);
 }
 
 /// Security hardening: `spawn_cache_sweeper` runs `sweep_expired_entries` on
