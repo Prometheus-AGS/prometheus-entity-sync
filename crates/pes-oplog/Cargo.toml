@@ -8,9 +8,21 @@ rust-version.workspace = true
 
 [dependencies]
 pes-core.workspace = true
-frf-store-redb.workspace = true
+redb = { workspace = true }
+rmp-serde.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+futures.workspace = true
+async-stream = "0.3"
+tracing.workspace = true
 
 [dev-dependencies]
 tokio-test.workspace = true
+criterion = { version = "0.5", features = ["async_tokio"] }
+tempfile = "3"
+serde_json.workspace = true
+
+[[bench]]
+name = "append_throughput"
+harness = false

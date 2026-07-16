@@ -42,6 +42,7 @@ futures = "0.3"
 # Database
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres"] }
 dashmap = "6"
+redb = { version = "4.1.0" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
