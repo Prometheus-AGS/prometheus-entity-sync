@@ -1,0 +1,11 @@
+version = "1"
+
+# `user_id` is declared as a parameter but has no matching parameter_queries entry.
+[buckets.user_entities]
+description = "Missing parameter_queries entry for a declared parameter"
+parameters = ["user_id"]
+
+[buckets.user_entities.parameter_queries]
+
+[buckets.user_entities.data]
+entities = "SELECT * FROM entities WHERE owner_id = {bucket_parameters.user_id}"

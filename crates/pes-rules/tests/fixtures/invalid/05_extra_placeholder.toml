@@ -1,0 +1,11 @@
+version = "1"
+
+[buckets.user_entities]
+description = "parameter_queries value has a second placeholder, $2, in addition to $1"
+parameters = ["user_id"]
+
+[buckets.user_entities.parameter_queries]
+user_id = "SELECT id FROM users WHERE auth_user_id = $1 AND tenant_id = $2"
+
+[buckets.user_entities.data]
+entities = "SELECT * FROM entities WHERE owner_id = {bucket_parameters.user_id}"

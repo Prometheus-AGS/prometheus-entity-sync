@@ -1,0 +1,11 @@
+version = "1"
+
+[buckets."2fast"]
+description = "Bucket id starts with a digit, violates [a-z][a-z0-9_-]*"
+parameters = ["user_id"]
+
+[buckets."2fast".parameter_queries]
+user_id = "SELECT id FROM users WHERE auth_user_id = $1"
+
+[buckets."2fast".data]
+entities = "SELECT * FROM entities WHERE owner_id = {bucket_parameters.user_id}"

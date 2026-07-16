@@ -1,0 +1,11 @@
+# No top-level `version` key — parser should default to "1".
+
+[buckets.simple]
+description = "Bucket with an implicit schema version"
+parameters = ["user_id"]
+
+[buckets.simple.parameter_queries]
+user_id = "SELECT id FROM users WHERE auth_user_id = $1"
+
+[buckets.simple.data]
+items = "SELECT * FROM items WHERE owner_id = {bucket_parameters.user_id}"

@@ -1,0 +1,10 @@
+version = "1"
+
+[buckets.orders]
+parameters = ["user_id"]
+
+[buckets.orders.parameter_queries]
+user_id = "SELECT id FROM users WHERE auth_user_id = $1"
+
+[buckets.orders.data]
+orders = "SELECT * FROM orders WHERE owner_id = {bucket_parameters.user_id}"

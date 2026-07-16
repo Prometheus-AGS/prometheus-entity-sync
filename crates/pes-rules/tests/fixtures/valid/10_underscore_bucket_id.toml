@@ -1,0 +1,11 @@
+version = "1"
+
+[buckets.user_settings_v1]
+description = "User settings, snake_case bucket id"
+parameters = ["user_id"]
+
+[buckets.user_settings_v1.parameter_queries]
+user_id = "SELECT id FROM users WHERE auth_user_id = $1"
+
+[buckets.user_settings_v1.data]
+settings = "SELECT * FROM settings WHERE owner_id = {bucket_parameters.user_id}"

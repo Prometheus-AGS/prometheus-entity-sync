@@ -1,0 +1,5 @@
+version = "1"
+
+[buckets.broken]
+description = "unterminated string
+parameters = ["user_id"]

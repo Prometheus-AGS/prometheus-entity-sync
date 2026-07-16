@@ -1,0 +1,11 @@
+version = "1"
+
+[buckets.public_reference_data]
+description = "Globally readable reference data, no per-user scoping"
+parameters = []
+
+[buckets.public_reference_data.parameter_queries]
+
+[buckets.public_reference_data.data]
+countries = "SELECT * FROM countries"
+currencies = "SELECT * FROM currencies"

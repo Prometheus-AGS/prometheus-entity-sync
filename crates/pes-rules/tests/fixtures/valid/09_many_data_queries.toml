@@ -1,0 +1,14 @@
+version = "1"
+
+[buckets.workspace]
+description = "Workspace bucket with several related data queries"
+parameters = ["user_id"]
+
+[buckets.workspace.parameter_queries]
+user_id = "SELECT id FROM users WHERE auth_user_id = $1"
+
+[buckets.workspace.data]
+documents = "SELECT * FROM documents WHERE owner_id = {bucket_parameters.user_id}"
+folders = "SELECT * FROM folders WHERE owner_id = {bucket_parameters.user_id}"
+comments = "SELECT * FROM comments WHERE author_id = {bucket_parameters.user_id}"
+attachments = "SELECT * FROM attachments WHERE uploader_id = {bucket_parameters.user_id}"

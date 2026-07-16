@@ -1,0 +1,11 @@
+version = "1"
+
+[buckets.user_entities]
+description = "parameter_queries value has no $1 placeholder at all"
+parameters = ["user_id"]
+
+[buckets.user_entities.parameter_queries]
+user_id = "SELECT id FROM users LIMIT 1"
+
+[buckets.user_entities.data]
+entities = "SELECT * FROM entities WHERE owner_id = {bucket_parameters.user_id}"

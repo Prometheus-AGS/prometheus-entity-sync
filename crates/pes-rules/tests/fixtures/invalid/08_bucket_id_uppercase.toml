@@ -1,0 +1,11 @@
+version = "1"
+
+[buckets.UserEntities]
+description = "Bucket id contains uppercase letters, violates [a-z][a-z0-9_-]*"
+parameters = ["user_id"]
+
+[buckets.UserEntities.parameter_queries]
+user_id = "SELECT id FROM users WHERE auth_user_id = $1"
+
+[buckets.UserEntities.data]
+entities = "SELECT * FROM entities WHERE owner_id = {bucket_parameters.user_id}"

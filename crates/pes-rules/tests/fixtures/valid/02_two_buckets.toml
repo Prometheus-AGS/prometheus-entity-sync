@@ -1,0 +1,22 @@
+version = "1"
+
+[buckets.user_entities]
+description = "All entities owned by the authenticated user"
+parameters = ["user_id"]
+
+[buckets.user_entities.parameter_queries]
+user_id = "SELECT id FROM users WHERE auth_user_id = $1"
+
+[buckets.user_entities.data]
+entities = "SELECT * FROM entities WHERE owner_id = {bucket_parameters.user_id}"
+tags = "SELECT * FROM entity_tags WHERE entity_id IN (SELECT id FROM entities WHERE owner_id = {bucket_parameters.user_id})"
+
+[buckets.tenant_shared]
+description = "Reference data shared across a tenant"
+parameters = ["tenant_id"]
+
+[buckets.tenant_shared.parameter_queries]
+tenant_id = "SELECT tenant_id FROM users WHERE auth_user_id = $1"
+
+[buckets.tenant_shared.data]
+entity_types = "SELECT * FROM entity_types WHERE tenant_id = {bucket_parameters.tenant_id}"

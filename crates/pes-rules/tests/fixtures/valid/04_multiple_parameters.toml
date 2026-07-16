@@ -1,0 +1,12 @@
+version = "1"
+
+[buckets.project-tasks]
+description = "Tasks within a project, scoped by user and project"
+parameters = ["user_id", "project_id"]
+
+[buckets.project-tasks.parameter_queries]
+user_id = "SELECT id FROM users WHERE auth_user_id = $1"
+project_id = "SELECT project_id FROM memberships WHERE user_auth_id = $1"
+
+[buckets.project-tasks.data]
+tasks = "SELECT * FROM tasks WHERE project_id = {bucket_parameters.project_id} AND assignee_id = {bucket_parameters.user_id}"

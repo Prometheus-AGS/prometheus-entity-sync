@@ -1,0 +1,11 @@
+version = "1"
+
+[buckets.self_and_manager]
+description = "Records where the user is either the owner or the manager"
+parameters = ["user_id"]
+
+[buckets.self_and_manager.parameter_queries]
+user_id = "SELECT id FROM users WHERE auth_user_id = $1 AND $1 IS NOT NULL"
+
+[buckets.self_and_manager.data]
+records = "SELECT * FROM records WHERE owner_id = {bucket_parameters.user_id} OR manager_id = {bucket_parameters.user_id}"

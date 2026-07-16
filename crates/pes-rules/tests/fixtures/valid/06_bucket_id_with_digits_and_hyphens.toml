@@ -1,0 +1,11 @@
+version = "1"
+
+[buckets.v2-user-notes]
+description = "User notes, versioned bucket name"
+parameters = ["user_id"]
+
+[buckets.v2-user-notes.parameter_queries]
+user_id = "SELECT id FROM users WHERE auth_user_id = $1"
+
+[buckets.v2-user-notes.data]
+notes = "SELECT * FROM notes WHERE owner_id = {bucket_parameters.user_id}"
