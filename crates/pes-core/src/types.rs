@@ -30,7 +30,7 @@ pub struct SyncRule {
 }
 
 /// A bucket assignment for one user, resolved from a [`SyncRule`] plus JWT claims.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BucketAssignment {
     /// The resolved bucket this user is assigned to.
     pub bucket_id: BucketId,

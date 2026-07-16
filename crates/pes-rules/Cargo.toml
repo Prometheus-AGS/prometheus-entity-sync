@@ -10,8 +10,14 @@ rust-version.workspace = true
 pes-core.workspace = true
 toml.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 regex.workspace = true
+sqlx.workspace = true
+dashmap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+static_assertions = "1"
