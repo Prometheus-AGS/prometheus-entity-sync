@@ -11,6 +11,8 @@ frf-domain.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+sqlx.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+static_assertions = "1"
