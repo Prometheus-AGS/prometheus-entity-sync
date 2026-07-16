@@ -6,6 +6,7 @@ members = [
     "crates/pes-oplog",
     "crates/pes-snapshot",
     "crates/pes-protocol",
+    "crates/pes-router",
     "crates/pes-gateway",
     "crates/pes-server",
     "crates/pes-sdk-rust",
@@ -25,6 +26,7 @@ pes-rules = { path = "crates/pes-rules" }
 pes-oplog = { path = "crates/pes-oplog" }
 pes-snapshot = { path = "crates/pes-snapshot" }
 pes-protocol = { path = "crates/pes-protocol" }
+pes-router = { path = "crates/pes-router" }
 pes-gateway = { path = "crates/pes-gateway" }
 
 # Flint Realtime Fabric (FRF) — reused server-side machinery
@@ -33,6 +35,7 @@ frf-crdt = { path = "../flint-realtime-fabric/crates/frf-crdt" }
 frf-store-redb = { path = "../flint-realtime-fabric/crates/frf-store-redb" }
 frf-ports = { path = "../flint-realtime-fabric/crates/frf-ports" }
 frf-domain = { path = "../flint-realtime-fabric/crates/frf-domain" }
+frf-broker-iggy = { path = "../flint-realtime-fabric/crates/frf-broker-iggy" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -40,7 +43,7 @@ tokio-tungstenite = "0.24"
 futures = "0.3"
 
 # Database
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid"] }
 dashmap = "6"
 redb = { version = "4.1.0" }
 
@@ -58,6 +61,7 @@ anyhow = "1"
 # Observability
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+prometheus = "0.13"
 
 # Testing
 proptest = "1"

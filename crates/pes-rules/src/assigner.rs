@@ -155,6 +155,54 @@ impl BucketAssigner {
         })
     }
 
+    /// Given a changed entity's type and row data, determine which
+    /// currently-cached [`BucketAssignment`]s should receive it — without a
+    /// Postgres round-trip.
+    ///
+    /// # Local evaluation scope (important limitation)
+    ///
+    /// `data_queries` are arbitrary SQL `SELECT` statements (e.g. `SELECT *
+    /// FROM entities WHERE owner_id = {bucket_parameters.user_id}`), and
+    /// this method does NOT implement a general SQL `WHERE`-clause
+    /// evaluator. Instead it checks the common single-owner-column pattern
+    /// used throughout `docs/sync-rules-reference.md`: for each cached
+    /// assignment whose `data_queries` contains an entry named
+    /// `entity_type`, the assignment is considered a match if any of its
+    /// resolved `parameters` values equals the value of `owner_column` in
+    /// `row_data` (tried against every resolved parameter, since the
+    /// column name used in a given rule's `WHERE` clause isn't known
+    /// generically — e.g. `owner_id`, `user_id`, `assignee_id`).
+    ///
+    /// This covers every example in the reference docs but is NOT correct
+    /// for multi-column filters, ranges, joins, or any `WHERE` clause more
+    /// complex than a single foreign-key equality check — those require a
+    /// real SQL predicate evaluator, which is out of scope here. Rules
+    /// with such filters should re-verify via [`Self::assign`] (a real
+    /// Postgres round-trip) rather than trusting this method's result as
+    /// authoritative for security-sensitive routing decisions.
+    pub fn find_affected_buckets(
+        &self,
+        entity_type: &str,
+        row_data: &serde_json::Value,
+    ) -> Vec<BucketId> {
+        let mut matched = Vec::new();
+        for entry in self.cache.iter() {
+            let (assignments, inserted_at) = entry.value();
+            if inserted_at.elapsed() >= self.cache_ttl {
+                continue;
+            }
+            for assignment in assignments {
+                if !assignment.data_queries.contains_key(entity_type) {
+                    continue;
+                }
+                if row_matches_assignment(row_data, assignment) {
+                    matched.push(assignment.bucket_id.clone());
+                }
+            }
+        }
+        matched
+    }
+
     /// Resolve one [`pes_core::SyncRule`] against `claims`. Returns `None`
     /// if the rule's parameter queries produce no matching row (the user is
     /// simply not authorized for this bucket — not an error condition).
@@ -224,5 +272,39 @@ impl BucketAssigner {
             parameters: resolved_json,
             data_queries,
         }))
+    }
+}
+
+/// Single-owner-column heuristic used by [`BucketAssigner::find_affected_buckets`]:
+/// does any of `assignment`'s resolved parameter values equal the value of
+/// a same-named-ish column in `row_data`? Since the actual `WHERE` column
+/// name a rule's `data_queries` filter uses isn't known generically, this
+/// tries every resolved parameter value against every top-level scalar
+/// field in `row_data` and matches on any equal pair.
+fn row_matches_assignment(row_data: &serde_json::Value, assignment: &BucketAssignment) -> bool {
+    let Some(row_object) = row_data.as_object() else {
+        return false;
+    };
+    assignment.parameters.values().any(|param_value| {
+        row_object
+            .values()
+            .any(|column_value| json_scalars_equal(param_value, column_value))
+    })
+}
+
+/// Compare two JSON scalars for equality, tolerating a string/number type
+/// mismatch (e.g. a resolved parameter stored as `"42"` matching a row
+/// column that decoded as the JSON number `42`) — `BucketAssignment`
+/// parameters are always stored as strings (see `resolve_rule` above),
+/// while `row_to_json`-derived row data preserves Postgres's native
+/// column types, so a strict `Value::eq` would never match a numeric id.
+fn json_scalars_equal(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+    if a == b {
+        return true;
+    }
+    match (a, b) {
+        (serde_json::Value::String(s), serde_json::Value::Number(n))
+        | (serde_json::Value::Number(n), serde_json::Value::String(s)) => *s == n.to_string(),
+        _ => false,
     }
 }

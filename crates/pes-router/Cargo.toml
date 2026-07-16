@@ -1,0 +1,33 @@
+[package]
+name = "pes-router"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+pes-core.workspace = true
+pes-rules.workspace = true
+pes-oplog.workspace = true
+frf-postgres-cdc.workspace = true
+frf-ports.workspace = true
+frf-domain.workspace = true
+tokio.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+prometheus.workspace = true
+
+[dev-dependencies]
+tokio-test.workspace = true
+frf-broker-iggy.workspace = true
+sqlx.workspace = true
+testcontainers = "0.23"
+testcontainers-modules = { version = "0.11", features = ["postgres"] }
+async-trait = "0.1"
+uuid = { version = "1", features = ["v4"] }
+tokio-stream = "0.1"
+tracing-subscriber.workspace = true
