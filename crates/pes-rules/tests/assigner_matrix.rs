@@ -106,7 +106,35 @@ async fn valid_jwt_single_matching_bucket() {
     let assigner = BucketAssigner::new(rule_set(vec![user_entities_rule()]), pool, Duration::from_secs(30)).expect("valid rule set");
     let result = assigner.assign(&claims("auth-sub-1", 3600)).await.unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].bucket_id.0, "user_entities");
+    // `bucket_id` is the internal, per-user-unique oplog partition key —
+    // not the bare rule name (that's `rule_id`, unchanged below). See
+    // `BucketAssigner::resolve_rule`'s doc comment: two different users
+    // matching the same rule must resolve to different `bucket_id`s, or
+    // pes-gateway would stream one user's live deltas to the other.
+    assert_eq!(result[0].rule_id, "user_entities");
+    assert!(
+        result[0].bucket_id.0.starts_with("user_entities:"),
+        "bucket_id should be the rule id plus a parameter-derived suffix, got '{}'",
+        result[0].bucket_id.0
+    );
+}
+
+/// Scenario: two different users matching the same rule get different,
+/// non-colliding `bucket_id`s — the actual security property this change
+/// exists to guarantee (see `valid_jwt_single_matching_bucket`'s comment).
+#[tokio::test]
+async fn different_users_same_rule_get_different_bucket_ids() {
+    let Some(pool) = connect().await else { return };
+    let assigner = BucketAssigner::new(rule_set(vec![user_entities_rule()]), pool, Duration::from_secs(30)).expect("valid rule set");
+    let result_1 = assigner.assign(&claims("auth-sub-1", 3600)).await.unwrap();
+    let result_2 = assigner.assign(&claims("auth-sub-2", 3600)).await.unwrap();
+    assert_eq!(result_1.len(), 1);
+    assert_eq!(result_2.len(), 1);
+    assert_eq!(result_1[0].rule_id, result_2[0].rule_id, "same rule");
+    assert_ne!(
+        result_1[0].bucket_id, result_2[0].bucket_id,
+        "different users matching the same rule must get different bucket_ids, or pes-gateway streams one user's deltas to the other"
+    );
 }
 
 /// Scenario: Valid JWT, 2 buckets match → returns 2 BucketAssignments.

@@ -8,10 +8,11 @@
  * is a pull-based `list()`/`get()` contract with an optional push
  * `subscribe()`; `prometheus-entity-sync` is fundamentally push-based (a
  * persistent stream of snapshot + delta ops). This transport reconciles the
- * two by making PGlite — kept current by the sync stream, per
- * `applyOps`/`prometheusSync` in `./extension.js` — the source `list()`/
- * `get()` read from. `subscribe()` then layers `ChangeEvent` notifications
- * on top so PEM's realtime-aware hooks re-render without polling.
+ * two by applying every delta op to its own PGlite `db` via `applyOps`
+ * (`./apply.js`) as it arrives, making that PGlite instance the source
+ * `list()`/`get()` read from. `subscribe()` then layers `ChangeEvent`
+ * notifications on top of that same apply step so PEM's realtime-aware
+ * hooks re-render without polling.
  *
  * `write()` is NOT part of `EntityTransport` (the interface has no mutation
  * method) — it's exposed alongside the returned transport object for a
@@ -31,8 +32,15 @@ import type {
 } from "@prometheus-ags/entity-graph-core";
 import { TerminalError, TransientError } from "@prometheus-ags/entity-graph-core";
 import type { PGlite, PGliteInterface } from "@electric-sql/pglite";
-import { SyncClient, type Op, type SyncClientConfig, type SyncStatus } from "@prometheus-ags/entity-sync-core";
+import {
+  SyncClient,
+  type BucketOp,
+  type Op,
+  type SyncClientConfig,
+  type SyncStatus,
+} from "@prometheus-ags/entity-sync-core";
 
+import { applyOps } from "./apply.js";
 import { createStatusStore, type StatusStore } from "./status-store.js";
 
 export interface PrometheusSyncConfig<T> {
@@ -143,10 +151,9 @@ export function prometheusSync<T extends object>(config: PrometheusSyncConfig<T>
       ensureSubscribed();
       return client.onDelta((delta) => {
         if (delta.bucketId !== bucket) return;
-        for (const op of delta.ops) {
-          if (op.entity_type !== table) continue;
-          void handleOp<T>(db, table, op.entity_id, op.op, onChange);
-        }
+        const relevant = delta.ops.filter((op) => op.entity_type === table);
+        if (relevant.length === 0) return;
+        void handleOps<T>(db, table, relevant, onChange);
       });
     },
 
@@ -167,18 +174,39 @@ export function prometheusSync<T extends object>(config: PrometheusSyncConfig<T>
 }
 
 /**
- * Convert one `BucketOp` into a `ChangeEvent` and invoke `onChange`.
+ * Apply a batch of same-table `BucketOp`s to `db` via `applyOps`, then
+ * invoke `onChange` once per op.
  *
- * `Upsert` carries its row inline. `CrdtPatch` doesn't — `apply.ts` merges
- * the patch directly into PGlite's `crdt_state` column, so the *entity
- * graph's* row shape isn't available from the op alone. Rather than
- * emitting a rowless `ChangeEvent` (which the engine's `useEntities`
- * subscribe handler silently ignores — it only calls `upsertEntity` when
- * `ev.row` is truthy, see `packages/entity-graph-react/src/hooks/use-entities.ts`
- * — meaning the graph would silently miss the update), this reads the
- * merged row back from PGlite so the graph actually receives it.
+ * `Upsert`'s row payload isn't the local envelope shape (`apply.ts` stores
+ * the whole upserted value under a single `payload` column, not spread
+ * across columns) and `CrdtPatch` carries no row payload at all — so in
+ * both cases the row `onChange` receives is read back from `db` *after*
+ * `applyOps` has written it, rather than derived from the op directly.
+ * This also means a `ChangeEvent` is never emitted for an op the apply
+ * step actually failed to persist (better to miss a notification than to
+ * tell a subscriber a write succeeded when it didn't).
  */
-async function handleOp<T extends object>(
+async function handleOps<T extends object>(
+  db: PGliteInterface | PGlite,
+  table: string,
+  ops: BucketOp[],
+  onChange: (ev: ChangeEvent<T>) => void,
+): Promise<void> {
+  try {
+    await applyOps(db, ops);
+  } catch {
+    // Best-effort: if the apply step fails, none of this batch's ops get a
+    // ChangeEvent — the next successful delta or an explicit refetch will
+    // catch the local database up.
+    return;
+  }
+  for (const bucketOp of ops) {
+    await notifyOne<T>(db, table, bucketOp.entity_id, bucketOp.op, onChange);
+  }
+}
+
+/** Notify `onChange` for one already-applied `BucketOp`, reading the row back from `db` when needed. */
+async function notifyOne<T extends object>(
   db: PGliteInterface | PGlite,
   table: string,
   entityId: string,
@@ -189,24 +217,18 @@ async function handleOp<T extends object>(
     onChange({ op: "delete", id: entityId });
     return;
   }
-  if (typeof op === "object" && "Upsert" in op) {
-    onChange({ op: "update", id: entityId, row: op.Upsert as T });
-    return;
-  }
-  if (typeof op === "object" && "CrdtPatch" in op) {
-    try {
-      const result = await db.query<T>(`SELECT * FROM ${identifierName(table)} WHERE id::text = $1 LIMIT 1`, [
-        entityId,
-      ]);
-      const row = result.rows[0];
-      if (row) {
-        onChange({ op: "update", id: entityId, row });
-      }
-    } catch {
-      // Best-effort: if the post-merge read fails, the entity simply
-      // doesn't get an update notification this round — the next
-      // successful delta or an explicit refetch will catch it up.
+  try {
+    const result = await db.query<T>(`SELECT * FROM ${identifierName(table)} WHERE id::text = $1 LIMIT 1`, [
+      entityId,
+    ]);
+    const row = result.rows[0];
+    if (row) {
+      onChange({ op: "update", id: entityId, row });
     }
+  } catch {
+    // Best-effort: if the post-apply read fails, the entity simply doesn't
+    // get an update notification this round — the next successful delta
+    // or an explicit refetch will catch it up.
   }
 }
 

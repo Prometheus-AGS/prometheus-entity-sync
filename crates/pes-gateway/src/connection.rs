@@ -125,10 +125,17 @@ impl ConnectionHandler {
         let claims = self.jwt_validator.validate(&token).await?;
         let assignments = self.assigner.assign(&claims).await?;
 
+        // Clients request/see buckets by `rule_id` (the bare, config-level
+        // name, e.g. "user_entities") — never `bucket_id`, which is the
+        // internal, per-user-unique oplog partition key (see
+        // `BucketAssigner::resolve_rule`'s doc comment on why the two must
+        // differ). `authorized_buckets`/`last_seen_lsn` are still keyed by
+        // the real `bucket_id` internally, so `poll_deltas`'s oplog scans
+        // stay correctly scoped to just this session's own partition.
         let requested: HashSet<String> = requested_buckets.into_iter().collect();
         let mut authorized_buckets = HashMap::new();
         for assignment in assignments {
-            if requested.contains(&assignment.bucket_id.0) {
+            if requested.contains(&assignment.rule_id) {
                 authorized_buckets.insert(assignment.bucket_id.clone(), assignment);
             }
         }
@@ -162,11 +169,17 @@ impl ConnectionHandler {
         }
 
         for assignment in &fresh_assignments {
+            // `bucket_id` (internal, per-user-unique) is used for every
+            // oplog operation; `wire_bucket_id` (the bare, client-facing
+            // rule name) is what actually goes out on the wire, matching
+            // what the client `Subscribe`d with. See `handshake`'s comment
+            // and `BucketAssigner::resolve_rule` for why these differ.
             let bucket_id = assignment.bucket_id.clone();
+            let wire_bucket_id = BucketId(assignment.rule_id.clone());
             let checksum = self.oplog.checksum(&bucket_id).await?;
             let total_rows = 0u64; // Row count is only known after the stream completes; see SnapshotComplete.
             self.send_message(&ServerMessage::SnapshotBegin {
-                bucket_id: bucket_id.clone(),
+                bucket_id: wire_bucket_id.clone(),
                 total_rows,
                 protocol_version: pes_protocol::PROTOCOL_VERSION,
             })
@@ -178,7 +191,7 @@ impl ConnectionHandler {
             while let Some(batch) = stream.next().await {
                 let batch = batch?;
                 self.send_message(&ServerMessage::SnapshotBatch {
-                    bucket_id: bucket_id.clone(),
+                    bucket_id: wire_bucket_id.clone(),
                     rows: batch.rows,
                     offset,
                 })
@@ -187,7 +200,7 @@ impl ConnectionHandler {
             }
 
             self.send_message(&ServerMessage::SnapshotComplete {
-                bucket_id: bucket_id.clone(),
+                bucket_id: wire_bucket_id.clone(),
                 checksum,
             })
             .await?;
@@ -486,8 +499,26 @@ impl ConnectionHandler {
             }
 
             let max_lsn = ops.iter().map(|op| op.lsn).max().unwrap_or(scan_from);
+            // Rewrite each op's internal, per-user-unique `bucket_id` to
+            // the bare, client-facing rule name before it goes on the wire
+            // — otherwise the internal partition key (which embeds this
+            // session's own resolved parameter values, e.g. an internal
+            // user_id) would leak into every delta frame, even though no
+            // current client actually reads `BucketOp.bucket_id`.
+            let wire_bucket_id = session
+                .authorized_buckets
+                .get(&bucket_id)
+                .map(|assignment| BucketId(assignment.rule_id.clone()))
+                .unwrap_or_else(|| bucket_id.clone());
+            let ops: Vec<BucketOp> = ops
+                .into_iter()
+                .map(|op| BucketOp {
+                    bucket_id: wire_bucket_id.clone(),
+                    ..op
+                })
+                .collect();
             self.send_message(&ServerMessage::Delta {
-                bucket_id: bucket_id.clone(),
+                bucket_id: wire_bucket_id,
                 ops,
                 lsn: max_lsn,
             })

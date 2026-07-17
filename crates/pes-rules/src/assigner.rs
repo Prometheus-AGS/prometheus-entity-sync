@@ -267,12 +267,42 @@ impl BucketAssigner {
         }
 
         Ok(Some(BucketAssignment {
-            bucket_id: BucketId(rule.id.clone()),
+            // SECURITY: `bucket_id` is the internal wire/oplog partition
+            // key and MUST be unique per (rule, resolved parameter values)
+            // — i.e. per authorized user, not per rule. `pes-router`
+            // appends each changed row exactly once to the oplog partition
+            // keyed by `bucket_id`, and `pes-gateway` streams a partition's
+            // entire contents to every session subscribed to it with no
+            // further per-session filtering. Using the bare rule id here
+            // (as an earlier version of this code did) makes every user
+            // matching the same rule share one physical partition, so any
+            // two such users see each other's live deltas — a cross-tenant
+            // data leak caught by `v4-pem-sync-transport`'s two-tab
+            // different-users integration test. `rule_id` (below) remains
+            // the bare, client-facing name clients `Subscribe` with and
+            // that `pes-gateway` echoes back on the wire — see
+            // `ConnectionHandler::handshake`'s match against `rule_id`,
+            // not `bucket_id`.
+            bucket_id: BucketId(format!("{}:{}", rule.id, parameter_key(&resolved_json))),
             rule_id: rule.id.clone(),
             parameters: resolved_json,
             data_queries,
         }))
     }
+}
+
+/// Build a stable, order-independent string key from a rule's resolved
+/// parameter values, for use as the unique suffix of an internal
+/// [`BucketId`]. Sorted by parameter name so the same resolved values
+/// always produce the same key regardless of `HashMap` iteration order.
+fn parameter_key(resolved: &HashMap<String, serde_json::Value>) -> String {
+    let mut entries: Vec<(&String, &serde_json::Value)> = resolved.iter().collect();
+    entries.sort_by(|a, b| a.0.cmp(b.0));
+    entries
+        .into_iter()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Single-owner-column heuristic used by [`BucketAssigner::find_affected_buckets`]:
