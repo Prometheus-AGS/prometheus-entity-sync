@@ -31,7 +31,10 @@ query_name = "SELECT ... WHERE col = {bucket_parameters.param_a}"
   `$1`.
 - `data` maps arbitrary query names to the SQL that selects the rows
   belonging to this bucket. Data queries may reference resolved parameter
-  values via `{bucket_parameters.<name>}` template substitution.
+  values via `{bucket_parameters.<name>}` template substitution. Every
+  substituted value renders as a single-quoted SQL string literal (e.g.
+  `'abc-123'`), never a bare token — see [Template substitution
+  rendering](#template-substitution-rendering) below.
 
 ## Full example
 
@@ -81,6 +84,36 @@ data query may only reference its own bucket's resolved parameters via
 `{bucket_parameters.X}`, never another bucket's data or parameters. There is
 therefore nothing for a cycle-detection pass to find yet — this is a design
 constraint of the DSL, not an unimplemented check.
+
+## Template substitution rendering
+
+[`pes_rules::template::substitute`] renders every `{bucket_parameters.X}`
+reference as a single-quoted SQL string literal — `owner_id =
+{bucket_parameters.user_id}` becomes `owner_id = 'abc-123'`. This is true
+regardless of the target column's type, because the resolved value is
+always text at the template layer; the substitution mechanism has no way to
+know whether `owner_id` is `UUID`, `TEXT`, or `BIGINT`.
+
+This means:
+
+- **String/UUID columns** (`owner_id UUID`, `owner_id TEXT`): substitution
+  works as-is. `owner_id = 'abc-123'` is valid SQL against either column
+  type — Postgres implicitly casts a text literal to `UUID` when comparing
+  against a `UUID` column.
+- **Numeric columns** (`count INT`, `amount BIGINT`): a text literal does
+  *not* implicitly cast to a numeric type in a comparison. Cast explicitly
+  on the query side:
+
+  ```toml
+  [buckets.b.data]
+  big_orders = "SELECT * FROM orders WHERE amount > {bucket_parameters.min_amount}::bigint"
+  ```
+
+Substituted values are always validated against
+[`pes_rules::template::validate_safe_value`]'s allowlist
+(`^[a-zA-Z0-9_-]{1,128}$`) before rendering, which excludes quote
+characters — so wrapping the value in `'...'` cannot be used to escape the
+literal it's placed in.
 
 ## Security note
 
