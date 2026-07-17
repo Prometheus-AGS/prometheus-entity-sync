@@ -14,3 +14,7 @@ export {
   encodeClient,
   encodeServer,
 } from "./codec.js";
+export { SyncClient } from "./client.js";
+export type { Delta, SnapshotBatch, SyncClientConfig, SyncStatus } from "./client.js";
+export { backoffDelayMs, ReconnectScheduler } from "./reconnect.js";
+export { decodeJwtExpiry, scheduleJwtRefresh, REFRESH_LEAD_MS } from "./jwt.js";

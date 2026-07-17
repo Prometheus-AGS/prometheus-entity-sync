@@ -5,6 +5,7 @@
   "license": "MIT",
   "packageManager": "pnpm@10.33.0",
   "scripts": {
-    "typecheck": "pnpm -r run typecheck"
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test"
   }
 }

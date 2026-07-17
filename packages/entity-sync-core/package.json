@@ -9,13 +9,22 @@
   "sideEffects": false,
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "generate-fixtures": "tsx scripts/generate-cross-lang-fixtures.ts"
+    "test": "vitest run",
+    "generate-fixtures": "tsx scripts/generate-cross-lang-fixtures.ts",
+    "build:bundle": "rollup -c rollup.config.js",
+    "size": "pnpm run build:bundle && node scripts/check-bundle-size.mjs"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.0.0"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
-    "tsx": "^4.19.0"
+    "tsx": "^4.19.0",
+    "vitest": "^2.1.0",
+    "rollup": "^4.24.0",
+    "@rollup/plugin-node-resolve": "^15.3.0",
+    "@rollup/plugin-typescript": "^12.1.0",
+    "@rollup/plugin-terser": "^0.4.4",
+    "rollup-plugin-visualizer": "^5.12.0"
   }
 }
