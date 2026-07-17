@@ -36,7 +36,17 @@ pub fn validate_safe_value(value: &str) -> bool {
 }
 
 /// Substitute every `{bucket_parameters.X}` reference in `query` with the
-/// corresponding value from `resolved_parameters`.
+/// corresponding value from `resolved_parameters`, rendered as a single-quoted
+/// SQL string literal (e.g. `'abc-123'`).
+///
+/// Every substituted value is always rendered as text, never a bare token —
+/// this is what makes the substitution valid SQL regardless of the target
+/// column's type. A rule author comparing against a numeric column must cast
+/// explicitly on the query side, e.g.
+/// `SELECT * FROM t WHERE count > {bucket_parameters.min_count}::int`.
+/// This is safe unconditionally because [`validate_safe_value`]'s allowlist
+/// (`^[a-zA-Z0-9_-]{1,128}$`) already excludes quote characters, so no value
+/// can escape the literal it's wrapped in.
 ///
 /// Returns [`ParseError::Validation`] if any referenced parameter is
 /// missing from `resolved_parameters`, or if its value fails
@@ -69,11 +79,11 @@ pub fn substitute(
     let rendered = TEMPLATE_REF_RE
         .replace_all(query, |caps: &regex::Captures<'_>| {
             let name = &caps[1];
-            // Safe: presence and validity were already confirmed above.
-            resolved_parameters
-                .get(name)
-                .cloned()
-                .unwrap_or_default()
+            // Safe: presence and validity were already confirmed above, and
+            // the allowlist excludes `'`, so this can't break out of the
+            // literal it's wrapped in.
+            let value = resolved_parameters.get(name).cloned().unwrap_or_default();
+            format!("'{value}'")
         })
         .into_owned();
 
@@ -142,7 +152,26 @@ mod tests {
             &params,
         )
         .expect("should substitute");
-        assert_eq!(rendered, "SELECT * FROM entities WHERE owner_id = abc-123");
+        assert_eq!(rendered, "SELECT * FROM entities WHERE owner_id = 'abc-123'");
+    }
+
+    #[test]
+    fn substitute_quotes_uuid_value_for_valid_sql() {
+        let mut params = HashMap::new();
+        params.insert(
+            "user_id".to_string(),
+            "550e8400-e29b-41d4-a716-446655440000".to_string(),
+        );
+        let rendered = substitute(
+            "b1",
+            "SELECT * FROM entities WHERE owner_id = {bucket_parameters.user_id}",
+            &params,
+        )
+        .expect("should substitute");
+        assert_eq!(
+            rendered,
+            "SELECT * FROM entities WHERE owner_id = '550e8400-e29b-41d4-a716-446655440000'"
+        );
     }
 
     #[test]

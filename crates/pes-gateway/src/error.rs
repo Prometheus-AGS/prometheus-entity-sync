@@ -29,6 +29,20 @@ pub enum GatewayErrorCode {
     Internal,
 }
 
+impl GatewayErrorCode {
+    /// The wire-level numeric code sent in `ServerMessage::Error`, in the
+    /// same 4000-series space as
+    /// `pes_protocol::ERROR_CODE_UNSUPPORTED_PROTOCOL_VERSION` (4000).
+    pub fn wire_code(self) -> u16 {
+        match self {
+            GatewayErrorCode::AuthInvalid => 4001,
+            GatewayErrorCode::BucketDenied => 4002,
+            GatewayErrorCode::ProtocolError => 4003,
+            GatewayErrorCode::Internal => 4099,
+        }
+    }
+}
+
 /// A redacted, client-safe representation of a [`SyncError`]. Safe to
 /// serialize and send directly in an HTTP or WebSocket error response.
 #[derive(Debug, Clone, PartialEq, Eq)]

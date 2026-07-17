@@ -19,7 +19,24 @@ tokio-tungstenite.workspace = true
 futures.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+sqlx.workspace = true
+dashmap.workspace = true
+jsonwebtoken.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 tokio-test.workspace = true
-sqlx.workspace = true
+testcontainers = "0.23"
+testcontainers-modules = { version = "0.11", features = ["postgres"] }
+wiremock = "0.6"
+rsa = { version = "0.9", features = ["pem"] }
+base64 = "0.22"
+pes-router.workspace = true
+frf-ports.workspace = true
+frf-domain.workspace = true
+async-trait = "0.1"
+uuid = { version = "1", features = ["v4"] }
+tokio-stream = "0.1"
+tracing-subscriber.workspace = true
