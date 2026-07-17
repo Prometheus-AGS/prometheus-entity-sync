@@ -71,7 +71,7 @@ async fn start_server() -> (ContainerAsync<GenericImage>, std::net::SocketAddr, 
     .await
     .expect("bind gateway server");
     let addr = server.local_addr().expect("local addr");
-    let handle = tokio::spawn(server.run());
+    let handle = tokio::spawn(server.run(tokio_util::sync::CancellationToken::new()));
 
     (container, addr, handle)
 }

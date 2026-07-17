@@ -10,6 +10,7 @@ use pes_rules::BucketAssigner;
 use sqlx::PgPool;
 use tokio::net::TcpListener;
 use tokio_tungstenite::accept_async;
+use tokio_util::sync::CancellationToken;
 
 use crate::auth::JwtValidator;
 use crate::connection::ConnectionHandler;
@@ -76,12 +77,33 @@ impl GatewayServer {
         self.listener.local_addr()
     }
 
-    /// Accept connections indefinitely, spawning a
-    /// [`ConnectionHandler`] task per accepted WebSocket connection.
-    /// Returns only on an unrecoverable accept error.
-    pub async fn run(self) -> std::io::Result<()> {
+    /// Current number of open connections. For a caller implementing
+    /// graceful shutdown: poll this after cancelling `shutdown` (passed to
+    /// [`Self::run`]) to know when every connection has drained.
+    pub fn connection_count(&self) -> &Arc<AtomicUsize> {
+        &self.connection_count
+    }
+
+    /// Accept connections until `shutdown` is cancelled, spawning a
+    /// [`ConnectionHandler`] task per accepted WebSocket connection. Each
+    /// spawned handler is given a clone of `shutdown` — when it's
+    /// cancelled, every open connection sends
+    /// [`crate::connection::SHUTDOWN_ERROR_CODE`] to its client and closes
+    /// (see [`ConnectionHandler::run`]'s shutdown-select branch).
+    ///
+    /// Returns once the accept loop itself stops (either `shutdown` fired,
+    /// or an unrecoverable accept error occurred) — it does NOT wait for
+    /// already-spawned connection tasks to finish closing. Callers
+    /// implementing full graceful shutdown should poll
+    /// [`Self::connection_count`] after this returns until it reaches
+    /// zero (or a deadline elapses), since connections close asynchronously
+    /// in their own spawned tasks.
+    pub async fn run(self, shutdown: CancellationToken) -> std::io::Result<()> {
         loop {
-            let (tcp_stream, peer_addr) = self.listener.accept().await?;
+            let (tcp_stream, peer_addr) = tokio::select! {
+                accepted = self.listener.accept() => accepted?,
+                () = shutdown.cancelled() => return Ok(()),
+            };
 
             // Connection limit check happens before the (relatively
             // expensive) WebSocket handshake, so an at-capacity server
@@ -99,6 +121,7 @@ impl GatewayServer {
             let jwt_validator = Arc::clone(&self.jwt_validator);
             let write_pool = self.write_pool.clone();
             let connection_count = Arc::clone(&self.connection_count);
+            let connection_shutdown = shutdown.clone();
 
             tokio::spawn(async move {
                 connection_count.fetch_add(1, Ordering::Relaxed);
@@ -118,6 +141,7 @@ impl GatewayServer {
                     oplog,
                     jwt_validator,
                     write_pool,
+                    connection_shutdown,
                 );
                 if let Err(e) = handler.run().await {
                     tracing::debug!(%peer_addr, error = %e, "connection ended");

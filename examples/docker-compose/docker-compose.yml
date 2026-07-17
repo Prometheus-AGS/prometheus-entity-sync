@@ -1,0 +1,60 @@
+# docker-compose stack for pes-server: server + Postgres (logical
+# replication enabled) + sync-rules.toml volume mount, per the
+# v4-pes-server-binary proposal.
+#
+# Usage (from this directory):
+#   AUTH_SECRET=some-dev-secret docker compose up --build
+#
+# The build context is the REPO ROOT'S PARENT (see ../../Dockerfile's own
+# BUILD CONTEXT comment) — set relative to this file's location
+# (examples/docker-compose/ -> ../../.. is the parent of both sibling
+# repos), so `docker compose build`/`up --build` from this directory
+# resolves the context correctly without extra flags.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=4
+      - -c
+      - max_wal_senders=4
+    volumes:
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+      - pes-postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  pes-server:
+    build:
+      context: ../../..
+      dockerfile: prometheus-entity-sync/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET must be set — e.g. AUTH_SECRET=some-dev-secret docker compose up}
+      PES_CONFIG_PATH: /etc/pes-server/config.toml
+      RUST_LOG: info
+    volumes:
+      - ./config.toml:/etc/pes-server/config.toml:ro
+      - ./sync-rules.toml:/etc/pes-server/sync-rules.toml:ro
+      - pes-server-oplog:/var/lib/pes-server/oplog
+    ports:
+      - "8080:8080" # WebSocket gateway
+      - "9090:9090" # /health /ready /metrics
+
+volumes:
+  pes-postgres-data:
+  pes-server-oplog:

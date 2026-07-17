@@ -15,10 +15,19 @@ use sqlx::PgPool;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
+use tokio_util::sync::CancellationToken;
 
 use crate::auth::JwtValidator;
 use crate::error::GatewayErrorResponse;
 use crate::server::GatewayConfig;
+
+/// Wire error code for [`ServerMessage::Error`] sent to every connected
+/// client when the server begins a graceful shutdown. Distinct from
+/// [`crate::error::GatewayErrorCode`]'s `wire_code()` range (4001-4099) —
+/// this isn't a redacted [`SyncError`], it's a server-lifecycle signal a
+/// well-behaved client should treat as "reconnect later," not an auth or
+/// protocol failure.
+pub const SHUTDOWN_ERROR_CODE: u16 = 1001;
 
 /// Drives one client connection's full lifecycle from the initial
 /// `Subscribe` handshake through to disconnect.
@@ -29,6 +38,7 @@ pub struct ConnectionHandler {
     oplog: Arc<BucketOpLog>,
     jwt_validator: Arc<JwtValidator>,
     write_pool: PgPool,
+    shutdown: CancellationToken,
 }
 
 /// Per-connection state established after a successful `Subscribe`.
@@ -39,6 +49,12 @@ struct Session {
 
 impl ConnectionHandler {
     /// Construct a handler for an already-upgraded WebSocket connection.
+    ///
+    /// `shutdown` is a [`CancellationToken`] shared across every connection
+    /// on the server — when the server begins a graceful shutdown, it
+    /// cancels the parent token, and every `ConnectionHandler`'s `serve()`
+    /// loop observes the cancellation, sends [`SHUTDOWN_ERROR_CODE`], and
+    /// closes.
     pub fn new(
         ws_stream: WebSocketStream<TcpStream>,
         config: Arc<GatewayConfig>,
@@ -46,6 +62,7 @@ impl ConnectionHandler {
         oplog: Arc<BucketOpLog>,
         jwt_validator: Arc<JwtValidator>,
         write_pool: PgPool,
+        shutdown: CancellationToken,
     ) -> Self {
         Self {
             ws_stream,
@@ -54,6 +71,7 @@ impl ConnectionHandler {
             oplog,
             jwt_validator,
             write_pool,
+            shutdown,
         }
     }
 
@@ -218,6 +236,10 @@ impl ConnectionHandler {
                 }
                 _ = keepalive.tick() => {
                     self.send_message(&ServerMessage::Keepalive { server_time_ms: now_ms() }).await?;
+                }
+                () = self.shutdown.cancelled() => {
+                    let _ = self.send_error(SHUTDOWN_ERROR_CODE, "server shutting down").await;
+                    return Ok(());
                 }
             }
         }

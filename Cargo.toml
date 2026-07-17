@@ -40,7 +40,11 @@ frf-broker-iggy = { path = "../flint-realtime-fabric/crates/frf-broker-iggy" }
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.24"
+tokio-util = "0.7"
 futures = "0.3"
+
+# HTTP server (health/metrics/ready endpoints)
+axum = "0.7"
 
 # Database
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid"] }

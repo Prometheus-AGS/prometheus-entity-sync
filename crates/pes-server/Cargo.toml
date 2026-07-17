@@ -11,8 +11,30 @@ name = "pes-server"
 path = "src/main.rs"
 
 [dependencies]
+pes-core.workspace = true
 pes-gateway.workspace = true
+pes-rules.workspace = true
+pes-oplog.workspace = true
+pes-router.workspace = true
+frf-postgres-cdc.workspace = true
+frf-domain.workspace = true
+frf-ports.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+sqlx.workspace = true
+axum.workspace = true
+prometheus.workspace = true
+async-trait = "0.1"
+tokio-stream = "0.1"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }

@@ -272,7 +272,7 @@ impl Harness {
         .await
         .expect("bind gateway server");
         let addr = server.local_addr().expect("local addr");
-        let server_handle = tokio::spawn(server.run());
+        let server_handle = tokio::spawn(server.run(tokio_util::sync::CancellationToken::new()));
 
         (
             Harness {

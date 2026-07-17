@@ -1,0 +1,12 @@
+target/
+**/target/
+node_modules/
+**/node_modules/
+.git/
+dist/
+**/dist/
+*.redb
+*.db
+*.sqlite
+.env
+.env.*

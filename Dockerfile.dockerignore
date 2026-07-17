@@ -1,0 +1,12 @@
+prometheus-entity-sync/target/
+prometheus-entity-sync/**/target/
+flint-realtime-fabric/target/
+flint-realtime-fabric/**/target/
+**/node_modules/
+**/.git/
+**/dist/
+**/*.redb
+**/*.db
+**/*.sqlite
+**/.env
+**/.env.*

@@ -7,6 +7,6 @@ pub mod error;
 pub mod server;
 
 pub use auth::{JwtValidationConfig, JwtValidator};
-pub use connection::ConnectionHandler;
+pub use connection::{ConnectionHandler, SHUTDOWN_ERROR_CODE};
 pub use error::{GatewayErrorCode, GatewayErrorResponse};
 pub use server::{GatewayConfig, GatewayServer};

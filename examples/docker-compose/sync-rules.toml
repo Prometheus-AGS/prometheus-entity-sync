@@ -1,0 +1,11 @@
+version = "1"
+
+[buckets.user_entities]
+description = "All entities owned by the authenticated user"
+parameters = ["user_id"]
+
+[buckets.user_entities.parameter_queries]
+user_id = "SELECT id FROM users WHERE auth_user_id = $1"
+
+[buckets.user_entities.data]
+entities = "SELECT * FROM entities WHERE owner_id = {bucket_parameters.user_id}"
