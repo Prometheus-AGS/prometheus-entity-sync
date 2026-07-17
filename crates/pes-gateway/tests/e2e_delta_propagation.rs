@@ -305,20 +305,28 @@ async fn connect_and_subscribe(
     token: &str,
 ) -> WebSocketStream<MaybeTlsStream<TcpStream>> {
     let (mut ws_stream, _) = tokio_tungstenite::connect_async(url).await.expect("connect");
-    // resume_lsn: Some(0) rather than None deliberately skips the initial
-    // snapshot-delivery phase (see ConnectionHandler::deliver_snapshots),
-    // isolating this test to the delta-propagation path under test. Full
-    // snapshot delivery for a UUID-keyed table currently fails for an
-    // unrelated, already-flagged pes-snapshot bug (`operator does not
-    // exist: uuid > text` in its keyset cursor comparison — see background
-    // task filed during this test's authoring) that both `pes-gateway` and
-    // the WAL pipeline (which requires UUID primary keys on watched
-    // tables) are blocked by, not something this test can work around by
-    // changing the table's id type.
+    // resume_lsn: None is the real first-connect path: it goes through
+    // snapshot delivery (empty snapshot here, since no rows exist yet at
+    // subscribe time) before entering the live delta-poll loop.
+    //
+    // This USED to use resume_lsn: Some(PgLsn(0)) as a shortcut to skip
+    // snapshot delivery, back when pes-snapshot had a real uuid/text
+    // keyset-cursor bug blocking snapshot delivery for UUID-keyed tables
+    // (since fixed). That shortcut turned out to be actively wrong once
+    // snapshot delivery worked again: PgLsn(0) is ambiguous between "I've
+    // seen nothing yet" and "I've already consumed the op at LSN 0" — and
+    // LSN 0 is a real, reachable value here (the router's broker-Offset
+    // surrogate LSN starts at 0, see pes-router's LSN-caveat doc comment).
+    // A pre-commit test run caught this directly: with resume_lsn:
+    // Some(0), poll_deltas's fixed off-by-one (see connection.rs) now
+    // correctly treats LSN 0 as already-delivered and skips it, so the
+    // very first op — which lands at LSN 0 — was never delivered at all.
+    // Using the real snapshot-then-live-delta path sidesteps the
+    // ambiguity entirely, matching how a real client actually connects.
     let subscribe = ClientMessage::Subscribe {
         buckets: vec!["user_entities".to_string()],
         token: token.to_string(),
-        resume_lsn: Some(pes_core::PgLsn(0)),
+        resume_lsn: None,
         protocol_version: pes_protocol::PROTOCOL_VERSION,
     };
     let bytes = encode_client(&subscribe).expect("encode subscribe");
@@ -326,7 +334,29 @@ async fn connect_and_subscribe(
         .send(Message::Binary(bytes.to_vec()))
         .await
         .expect("send subscribe");
+
+    drain_until_snapshot_complete(&mut ws_stream).await;
     ws_stream
+}
+
+/// Drain `ServerMessage::SnapshotBegin`/`SnapshotBatch`/`SnapshotComplete`
+/// messages for every subscribed bucket until the connection has finished
+/// its initial-sync phase, so callers can start waiting for `Delta`
+/// messages without a stray snapshot message being mistaken for one.
+async fn drain_until_snapshot_complete(ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            panic!("timed out waiting for SnapshotComplete");
+        }
+        let Ok(Some(Ok(Message::Binary(bytes)))) = tokio::time::timeout(remaining, ws_stream.next()).await else {
+            continue;
+        };
+        if let Ok(ServerMessage::SnapshotComplete { .. }) = decode_server(&bytes) {
+            return;
+        }
+    }
 }
 
 /// Drain messages from `stream` until a `ServerMessage::Delta` for
@@ -370,12 +400,12 @@ async fn write_propagates_to_other_subscribed_client_within_200ms() {
     let url = harness.ws_url();
     let token = test_jwt();
 
-    // Both clients subscribe with resume_lsn set, skipping snapshot
-    // delivery — see connect_and_subscribe's doc comment for why. Client A
-    // itself only needs to be a live, subscribed connection (proving its
-    // presence doesn't interfere with client B's delivery) — the actual
-    // write goes directly to Postgres, standing in for what
-    // `ClientMessage::Write` would ultimately drive via `handle_write`.
+    // Both clients subscribe and drain their (empty) initial snapshot —
+    // see connect_and_subscribe's doc comment. Client A itself only needs
+    // to be a live, subscribed connection (proving its presence doesn't
+    // interfere with client B's delivery) — the actual write goes
+    // directly to Postgres, standing in for what `ClientMessage::Write`
+    // would ultimately drive via `handle_write`.
     let _client_a = connect_and_subscribe(&url, &token).await;
     let mut client_b = connect_and_subscribe(&url, &token).await;
 
@@ -408,5 +438,60 @@ async fn write_propagates_to_other_subscribed_client_within_200ms() {
     assert!(
         elapsed_since_write < Duration::from_secs(5),
         "delta propagation took {elapsed_since_write:?}, expected well under 5s"
+    );
+}
+
+/// Regression test for a real bug found writing `v4-entity-sync-ts-sdk`'s
+/// integration tests: `ConnectionHandler::poll_deltas` stored the *last
+/// delivered* LSN as the *next scan start*, but `BucketOpLog::drain_since`
+/// is inclusive of its `from_lsn` argument — so the same op was
+/// re-delivered as a fresh `Delta` on every single 50ms poll tick,
+/// forever, rather than exactly once. Caught live via a debug script that
+/// logged 50+ identical `Delta` messages for a single write within a few
+/// seconds. Fixed by scanning from `last_seen_lsn + 1` (see
+/// `connection.rs`'s `poll_deltas`). This test proves a single write
+/// produces exactly one `Delta` for that entity, not a flood of repeats.
+#[tokio::test]
+async fn a_single_write_is_delivered_as_exactly_one_delta_not_repeated() {
+    let (harness, pool) = Harness::start().await;
+    let url = harness.ws_url();
+    let token = test_jwt();
+
+    let mut client = connect_and_subscribe(&url, &token).await;
+
+    let entity_id = uuid::Uuid::new_v4();
+    sqlx::query("INSERT INTO entities (id, owner_id, payload) VALUES ($1, $2, 'delivered-once')")
+        .bind(entity_id)
+        .bind(uuid::Uuid::parse_str(TEST_USER_ID).expect("TEST_USER_ID is a valid UUID"))
+        .execute(&pool)
+        .await
+        .expect("insert entity");
+
+    // Collect every Delta mentioning this entity_id over a window several
+    // multiples of the 50ms poll interval — long enough that, under the
+    // pre-fix bug, dozens of duplicate deliveries would have accumulated.
+    let mut deliveries = 0usize;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        let Ok(Some(Ok(Message::Binary(bytes)))) = tokio::time::timeout(remaining, client.next()).await else {
+            continue;
+        };
+        let Ok(ServerMessage::Delta { bucket_id, ops, .. }) = decode_server(&bytes) else {
+            continue;
+        };
+        if bucket_id.0 == "user_entities" && ops.iter().any(|op| op.entity_id == entity_id.to_string()) {
+            deliveries += 1;
+        }
+    }
+
+    harness.shutdown();
+
+    assert_eq!(
+        deliveries, 1,
+        "a single write must be delivered as exactly one Delta, not {deliveries} (pre-fix, this kept growing without bound)"
     );
 }

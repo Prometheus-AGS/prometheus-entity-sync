@@ -204,6 +204,14 @@ impl Harness {
 /// `resume_lsn`, since this test only cares about the write path), then send
 /// one `ClientMessage::Write` and return the first `ServerMessage` response
 /// (if any arrives within 5s).
+///
+/// `resume_lsn: Some(PgLsn(0))` is safe specifically in this test (unlike
+/// `e2e_delta_propagation.rs`, which switched to `None` after a real bug —
+/// see that file's `connect_and_subscribe` doc comment): this test never
+/// asserts on receiving a `Delta`, only on the immediate `Write` response
+/// (an `Error` for the rejected case, or a DB-state poll for the accepted
+/// case), so the LSN-0 ambiguity that broke delta delivery elsewhere
+/// doesn't affect anything this test actually checks.
 async fn subscribe_and_write(
     url: &str,
     auth_sub: &str,

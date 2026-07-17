@@ -462,13 +462,20 @@ impl ConnectionHandler {
     async fn poll_deltas(&mut self, session: &mut Session) -> Result<(), SyncError> {
         let bucket_ids: Vec<BucketId> = session.authorized_buckets.keys().cloned().collect();
         for bucket_id in bucket_ids {
-            let from_lsn = session
-                .last_seen_lsn
-                .get(&bucket_id)
-                .copied()
-                .unwrap_or(PgLsn(0));
+            // `last_seen_lsn` tracks the highest LSN already delivered to
+            // this client (inclusive) — what a `ClientMessage::Ack` reports
+            // and what `Delta.lsn` below echoes back. `drain_since`'s scan
+            // start, however, is documented as inclusive of `from_lsn`, so
+            // scanning from the same value stored here would re-include
+            // the already-delivered op on every subsequent poll forever
+            // (verified live: without the +1 offset below, a single write
+            // was redelivered on every 50ms poll tick indefinitely). The
+            // scan start is therefore one past the last delivered LSN,
+            // kept as a local-only value distinct from `last_seen_lsn`.
+            let last_delivered = session.last_seen_lsn.get(&bucket_id).copied();
+            let scan_from = last_delivered.map(|lsn| PgLsn(lsn.0 + 1)).unwrap_or(PgLsn(0));
 
-            let mut stream = Box::pin(self.oplog.drain_since(&bucket_id, from_lsn));
+            let mut stream = Box::pin(self.oplog.drain_since(&bucket_id, scan_from));
             let mut ops: Vec<BucketOp> = Vec::new();
             while let Some(op) = stream.next().await {
                 ops.push(op?);
@@ -478,7 +485,7 @@ impl ConnectionHandler {
                 continue;
             }
 
-            let max_lsn = ops.iter().map(|op| op.lsn).max().unwrap_or(from_lsn);
+            let max_lsn = ops.iter().map(|op| op.lsn).max().unwrap_or(scan_from);
             self.send_message(&ServerMessage::Delta {
                 bucket_id: bucket_id.clone(),
                 ops,
