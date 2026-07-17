@@ -14,10 +14,12 @@
     "@prometheus-ags/entity-sync-core": "workspace:*"
   },
   "peerDependencies": {
-    "@electric-sql/pglite": "^0.2.0"
+    "@electric-sql/pglite": "^0.2.0",
+    "@prometheus-ags/entity-graph-core": "^3.0.0-alpha.0"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
-    "@electric-sql/pglite": "^0.2.0"
+    "@electric-sql/pglite": "^0.2.0",
+    "@prometheus-ags/entity-graph-core": "^3.0.0-alpha.0"
   }
 }

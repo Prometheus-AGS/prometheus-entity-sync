@@ -198,7 +198,14 @@ export class SyncClient {
       }
       return;
     }
-    this.ws.send(encodeClient(msg));
+    // encodeClient's return type is Uint8Array<ArrayBufferLike> (which
+    // could in principle be backed by a SharedArrayBuffer), but
+    // WebSocket.send's stricter DOM typing (as of newer TypeScript
+    // lib.dom.d.ts revisions) requires a Uint8Array<ArrayBuffer>
+    // specifically. msgpack's encode() always allocates a plain
+    // ArrayBuffer in practice, so .slice() (a cheap, correctly-typed copy)
+    // satisfies the type without changing behavior.
+    this.ws.send(encodeClient(msg).slice());
   }
 
   private handleMessage(data: ArrayBuffer): void {
