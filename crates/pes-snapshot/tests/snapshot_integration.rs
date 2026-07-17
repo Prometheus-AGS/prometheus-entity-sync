@@ -64,6 +64,60 @@ fn single_bucket_assignment() -> Vec<BucketAssignment> {
     }]
 }
 
+async fn start_postgres_with_uuid_fixture(row_count: usize) -> (ContainerAsync<Postgres>, sqlx::PgPool) {
+    let container = Postgres::default()
+        .start()
+        .await
+        .expect("start postgres container");
+    let port = container
+        .get_host_port_ipv4(5432)
+        .await
+        .expect("get mapped port");
+    let url = format!("postgres://postgres:postgres@127.0.0.1:{port}/postgres");
+
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&url)
+        .await
+        .expect("connect to test postgres");
+
+    sqlx::query("CREATE EXTENSION IF NOT EXISTS \"pgcrypto\"")
+        .execute(&pool)
+        .await
+        .expect("enable pgcrypto for gen_random_uuid()");
+    sqlx::query("CREATE TABLE uuid_snapshot_fixture (id UUID PRIMARY KEY, _version INT NOT NULL, name TEXT NOT NULL)")
+        .execute(&pool)
+        .await
+        .expect("create uuid fixture table");
+
+    // Bulk-insert via generate_series + gen_random_uuid(), matching the
+    // bigint fixture's generation style.
+    sqlx::query(
+        "INSERT INTO uuid_snapshot_fixture (id, _version, name) \
+         SELECT gen_random_uuid(), 1, 'row_' || i FROM generate_series(1, $1::bigint) AS i",
+    )
+    .bind(row_count as i64)
+    .execute(&pool)
+    .await
+    .expect("seed uuid fixture rows");
+
+    (container, pool)
+}
+
+fn uuid_bucket_assignment() -> Vec<BucketAssignment> {
+    let mut data_queries = HashMap::new();
+    data_queries.insert(
+        "uuid_snapshot_fixture".to_string(),
+        "SELECT * FROM uuid_snapshot_fixture".to_string(),
+    );
+    vec![BucketAssignment {
+        bucket_id: BucketId("uuid_snapshot_test_bucket".to_string()),
+        rule_id: "uuid_snapshot_test_rule".to_string(),
+        parameters: HashMap::new(),
+        data_queries,
+    }]
+}
+
 /// Snapshot a 100,000-row table: verify every row is emitted exactly once,
 /// the batch checksum sequence is deterministic across two independent
 /// runs, and the whole operation completes well within the proposal's
@@ -204,5 +258,56 @@ async fn two_identical_snapshots_produce_identical_batch_checksums() {
             b1.offset
         );
         assert_eq!(b1.rows.len(), b2.rows.len());
+    }
+}
+
+/// Regression test for the `IdCast::Text` keyset-pagination path with a
+/// `UUID` primary key: before the fix, `fetch_page`'s generated WHERE
+/// clause cast only the bound cursor (`($1::text)::text`), never `sq.id`
+/// itself, so the comparison was `uuid > text` — an operator Postgres does
+/// not have (`error returned from database: operator does not exist: uuid
+/// > text`). This table has zero overlap with `snapshot_fixture`'s `BIGINT`
+/// id, which only ever exercises `IdCast::Numeric`.
+///
+/// A small batch size forces multiple pages (and thus a real, non-null
+/// cursor bind on the second page onward), so this actually exercises the
+/// `sq.id::text > ($1::text)::text` comparison rather than only the
+/// first-page `$1 IS NULL` branch.
+#[tokio::test]
+async fn snapshot_uuid_id_column_paginates_without_type_error() {
+    const ROW_COUNT: usize = 250;
+    const BATCH_SIZE: usize = 40;
+    let (_container, pool) = start_postgres_with_uuid_fixture(ROW_COUNT).await;
+
+    let stream = SnapshotStream::new(pool, uuid_bucket_assignment()).with_batch_size(BATCH_SIZE);
+    let batches: Vec<_> = stream
+        .stream()
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(|r| r.expect("batch ok — must not hit 'operator does not exist: uuid > text'"))
+        .collect();
+
+    let total_rows: usize = batches.iter().map(|b| b.rows.len()).sum();
+    assert_eq!(total_rows, ROW_COUNT, "every row must be emitted exactly once");
+    assert!(batches.len() > 1, "test must exercise multiple pages (a real cursor bind), not just the first");
+    assert!(
+        batches.last().expect("at least one batch").is_last,
+        "the final batch must be marked is_last"
+    );
+    assert!(
+        batches[..batches.len() - 1].iter().all(|b| !b.is_last),
+        "only the final batch may be marked is_last"
+    );
+
+    // No duplicate ids across pages — proves the keyset cursor actually
+    // advanced past each page's last row rather than, say, silently
+    // re-fetching the same page.
+    let mut seen_ids = std::collections::HashSet::new();
+    for batch in &batches {
+        for row in &batch.rows {
+            let id = row.get("id").and_then(|v| v.as_str()).expect("row has string id");
+            assert!(seen_ids.insert(id.to_string()), "id {id} appeared in more than one batch");
+        }
     }
 }

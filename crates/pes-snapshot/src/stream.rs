@@ -208,8 +208,16 @@ async fn fetch_page(
     // lexicographically, but 2 < 10 numerically) — caught by the 100K-row
     // integration test, which returned 749,966 rows instead of 100,000
     // before this fix.
+    //
+    // Both sides of the comparison must be cast to `cast`, not just the
+    // bound cursor: `sq.id` retains its native column type (e.g. `uuid`),
+    // and Postgres has no `uuid > text`/`uuid > numeric` operator, so
+    // casting only `$1` still fails to parse for any non-numeric id type
+    // (`error returned from database: operator does not exist: uuid >
+    // text`). Casting `sq.id` too — `sq.id::{cast} > ($1::text)::{cast}` —
+    // makes both sides the same type regardless of the column's native type.
     let wrapped = format!(
-        "SELECT row_to_json(sq) AS row_data FROM ({query}) AS sq WHERE ($1::text IS NULL OR sq.id > ($1::text)::{cast}) ORDER BY sq.id LIMIT $2",
+        "SELECT row_to_json(sq) AS row_data FROM ({query}) AS sq WHERE ($1::text IS NULL OR sq.id::{cast} > ($1::text)::{cast}) ORDER BY sq.id LIMIT $2",
         cast = id_cast.as_sql(),
     );
 
